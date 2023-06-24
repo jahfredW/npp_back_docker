@@ -1,0 +1,99 @@
+version: '3'
+
+services:
+###> doctrine/doctrine-bundle ###
+  database:
+    image: 'mariadb:10.4.27'
+    container_name: db_docker_symfony
+    environment:
+      MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: true
+      MARIADB_ROOT_PASSWORD: ""
+      MARIADB_DATABASE: "npp"
+    volumes:
+      - db-data:/var/lib/mysql
+    ports:
+      - '3306'
+    networks:
+      - dev
+
+###> symfony/mailer ###
+  maildev:
+    image: maildev/maildev
+    container_name: maildev_docker_symfony
+    command: bin/maildev --web 80 --smtp 25 --hide-extensions STARTTLS
+    ports:
+      - "8082:80"
+    restart: always
+    networks:
+        - dev
+###< symfony/mailer ###
+
+# phpmyadmin
+  phpmyadmin:
+      image: phpmyadmin
+      restart: always
+      depends_on:
+        - database
+      ports:
+        - 8080:80
+      environment:
+        PMA_HOST: database
+        UPLOAD_LIMIT: 64M
+      networks:
+        - dev
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8081:80
+
+  www:
+    build: php
+    container_name: www_docker_symfony
+    # ports:
+    #   - "8000:80"
+    volumes:
+        - ./php/vhosts:/etc/apache2/sites-enabled
+        - ./:/var/www
+    restart: always
+    labels:
+        - "traefik.http.routers.app1.rule=Host(`app1.traefik.me`)"
+        - "traefik.http.routers.app1-tls.tls.domains[0].main=app1.traefik.me"
+        - "traefik.http.routers.app1-tls.tls.domains[0].sans=app1-*.traefik.me"
+        - "traefik.http.routers.app1.tls=true"
+    networks:
+        - dev
+  
+  traefik:
+      restart: unless-stopped
+      image: traefik:v2.0.2
+      container_name: traefik
+      ports:
+        - "80:80"
+        - "443:443"
+      labels:
+        - "traefik.http.services.traefik.loadbalancer.server.port=8080"
+      volumes:
+        - ./traefik.yml:/etc/traefik/traefik.yml
+        - ./tls.yml:/etc/traefik/tls.yml
+        - /var/run/docker.sock:/var/run/docker.sock
+        - certs:/etc/ssl/traefik
+      networks:
+          - dev
+
+  reverse-proxy-https-helper:
+    image: alpine
+    command: sh -c "cd /etc/ssl/traefik
+      && wget traefik.me/cert.pem -O cert.pem
+      && wget traefik.me/privkey.pem -O privkey.pem"
+    volumes:
+      - certs:/etc/ssl/traefik
+    networks:
+        - dev
+
+networks:
+    dev:
+
+volumes:
+    db-data:
+    certs:
